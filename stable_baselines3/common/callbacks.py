@@ -8,7 +8,9 @@ import numpy as np
 
 from stable_baselines3.common import base_class  # pytype: disable=pyi-error
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, sync_envs_normalization
+from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, sync_envs_normalization, unwrap_vec_normalize
+from stable_baselines3.common.type_aliases import GymEnv
+from stable_baselines3.common.utils import check_for_correct_spaces
 
 
 class BaseCallback(ABC):
@@ -381,6 +383,35 @@ class EvalCallback(EventCallback):
         # For computing success rate
         self._is_success_buffer = []
         self.evaluations_successes = []
+
+    def set_eval_env(self, env: GymEnv, force_reset: bool = True) -> None:
+        """
+        Checks the validity of the environment, and if it is coherent, set it as the current environment.
+        Furthermore wrap any non vectorized env into a vectorized
+        checked parameters:
+        - observation_space
+        - action_space
+        :param env: The environment for learning a policy
+        :param force_reset: Force call to ``reset()`` before training
+            to avoid unexpected behavior.
+            See issue https://github.com/DLR-RM/stable-baselines3/issues/597
+        """
+        # if it is not a VecEnv, make it a VecEnv
+        # and do other transformations (dict obs, image transpose) if needed
+        env = self._wrap_env(env, self.verbose)
+        # Check that the observation spaces match
+        check_for_correct_spaces(env, self.observation_space, self.action_space)
+        # Update VecNormalize object
+        # otherwise the wrong env may be used, see https://github.com/DLR-RM/stable-baselines3/issues/637
+        self._vec_normalize_env = unwrap_vec_normalize(env)
+
+        # Discard `_last_obs`, this will force the env to reset before training
+        # See issue https://github.com/DLR-RM/stable-baselines3/issues/597
+        if force_reset:
+            self._last_obs = None
+
+        self.eval_env = env
+
 
     def _init_callback(self) -> None:
         # Does not work in some corner cases, where the wrapper is not the same
